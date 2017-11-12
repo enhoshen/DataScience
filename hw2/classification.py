@@ -1,6 +1,7 @@
 import sklearn as sk
 import numpy as np
 import sys
+import os.path
 from sklearn import linear_model , tree , neural_network , svm
 from sklearn.svm import SVC
 from sklearn.preprocessing import StandardScaler
@@ -13,9 +14,9 @@ class classifier ():
     
     def __init__ (self):
         self.mtype, self.trainfile,self.testfile= argparse()
-        self.handIndataparse()
         self.functable={'R':self.Regression,'D':self.DecisionTree,'S':self.Svm,'N':self.NN}
     def handInRun (self):
+        self.handIndataparse() 
         self.pred = self.functable[self.mtype]()
         self.genpredcsv(self.pred)
     def handIndataparse (self):
@@ -23,13 +24,13 @@ class classifier ():
         self.trn_x = self.train[:,:-1]
         self.trn_y = self.train[:,-1]
         self.test  = np.genfromtxt(self.testfile ,delimiter=',') 
-    def selfCheckRun (self):
+    def CheckRun (self):
+        self.Checkdataparse()
         self.pred = self.functable[self.mtype]()
         accArr = [ 1 if x==y else 0 for x,y in zip(self.pred,self.label)]
         accCnt = np.count_nonzero(accArr)
-        self.genpredcsv(self.pred)
         print ("accuracy:" + str( accCnt/len(accArr)*100 ))
-    def selfCheckdataparse(self):
+    def Checkdataparse(self):
         self.data = np.genfromtxt( 'spambase.csv' , delimiter=',')
         np.random.shuffle(self.data)
         self.datanum = self.data.shape[0]
@@ -81,7 +82,7 @@ class classifier ():
         return 
 if __name__ == '__main__':
     C = classifier()
-    C.selfCheckdataparse()
-    C.selfCheckRun()    
+    if os.path.isfile('spambase.csv') :
+        C.CheckRun()    
     C.handInRun()
 
