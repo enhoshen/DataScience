@@ -5,15 +5,15 @@ from time import time
 
 from sklearn.model_selection import train_test_split
 from keras.models import Sequential
-from keras.layers.core import Dense, Dropout, Activation
-from keras.layers import BatchNormalization, Convolution2D, MaxPooling2D, Flatten
 from keras.optimizers import Adam
 from keras.preprocessing.image import ImageDataGenerator
 
+from keras.layers.core import Dense, Dropout, Activation
+from keras.layers import BatchNormalization, Convolution2D, MaxPooling2D, Flatten
 
 
 def loaddata ():
-    data_dir = '/home/enhoshen/Desktop/JiaCheng/hw3/cifar-10-batches-py/'
+    data_dir = './cifar-10-batches-py/'
     data_files = ['data_batch_1', 'data_batch_2', 'data_batch_2', 'data_batch_2', 'data_batch_2']
     test_file = 'test_batch'
     def unpickle(file):
@@ -154,27 +154,17 @@ def main():
     datagen.fit(train_x)
 
     # train
-    batch_size = 100
-    iter_num1 = 1
-    epoch_num1 = 1
-    iter_num2 = 100
-    epoch_num2 = 1
+    ite = 100
+    epoch = 1
     best_loss = 1
-    new_best = False
-    '''
-    t0 = time()
-    for i in range(iter_num1):
-        print('normal training with iteration: ' + str(i+1) + '/' + str(iter_num1))
-        model.fit(train_x, train_y, batch_size=batch_size, epochs=epoch_num1, shuffle=True, verbose=1, validation_data=(val_x, val_y))
-        score = model.evaluate(test_x, test_y, batch_size=batch_size)
-        print('testing loss: ' + str('%.3f'%score[0]) + ', testing acc: ' + str('%.3f'%score[1]))
-    '''   
-    for i in range(iter_num2):
-        print('iter: ' + str(i+1) + '/' + str(iter_num2))
+    batch_size = 100
+    
+    for i in range(ite):
+        print('iter: ' + str(i+1) + '/' + str(ite))
         model.fit_generator(
                 datagen.flow(train_x, train_y, batch_size=batch_size),
                 samples_per_epoch=train_x.shape[0],
-                epochs=epoch_num2,
+                epochs=epoch,
                 verbose=1,
                 pickle_safe=False
                 )
@@ -182,15 +172,7 @@ def main():
         score = model.evaluate(val_x, val_y, batch_size=batch_size)
         print('val loss: ' + str('%.3f'%score[0]) + ', val acc: ' + str('%.3f'%score[1]))
 
-        if (score[0]<best_loss):
-                best_loss = score[0]
-                new_best = True
-                if (new_best and score[1]>0.9):
-                        best_score = model.evaluate(test_x, test_y, batch_size=batch_size)
-                        model.save('model_' + str('%.3f'%best_score[1])[2:])
-        else:
-               new_best = False
-        # test
+
     score = model.evaluate(test_x, test_y, batch_size=batch_size)
     print('testing loss: ' + str('%.3f'%score[0]) + ', testing acc: ' + str('%.3f'%score[1]))
     # test
