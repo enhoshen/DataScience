@@ -136,8 +136,8 @@ def alexmodel():
 def main():
     train_x , train_y , val_x, val_y, test_x, test_y = loaddata()
     #model = mymodel()
-    #model = myBNmodel()
-    model = alexmodel()
+    model = myBNmodel()
+    #model = alexmodel()
 
     # augmentation
     datagen = ImageDataGenerator(
