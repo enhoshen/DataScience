@@ -13,8 +13,8 @@
 #include "ResizableArray.h"
 #include "device_launch_parameters.h"
 
-int THREADNUM = 1024;
-int BLOCKNUM = 20;
+int THREADNUM = 256;
+int BLOCKNUM = 256;
 
 struct ItemDetail{
 	int id;
@@ -60,6 +60,8 @@ void ReadInput(FILE *inputFile, int *tNum, int *iNum, int *&index, float supPer,
 void mineGPU(EClass* eClass, int minSup, int* index, int length);
 void mineCPU(EClass* eClass, int minSup, int* index, int length);
 int NumberOfSetBits(int i);
+void divNcon(EClass *eClass, int minSup, int* index, int length, int* intersect, int* sup, int*a_gpu, int*b_gpu, int*sup_gpu);
+__global__ void kernel(int*a_gpu, int*b_gpu, int*sup_gpu, unsigned int length);
 
 auto out = &cout;
 int main(int argc, char** argv){
@@ -188,9 +190,113 @@ void ReadInput(FILE *inputFile, int *tNum, int *iNum, int *&index, float supPer,
 *
 */
 
+
 void mineGPU(EClass *eClass, int minSup, int* index, int length){
-	// TODO: fill this function to use gpu to accelerate the process of eclat
+
+	unsigned int n = length;
+	int * intersect;
+	int * sup;
+	intersect = (int*)malloc(BLOCKNUM*n*sizeof(int));
+	sup = (int*)malloc(BLOCKNUM*sizeof(int));
+
+	int * a_gpu;
+	int * b_gpu;
+	int * sup_gpu;
+	cudaMalloc((void**)&a_gpu, n*sizeof(int));
+	cudaMalloc((void**)&b_gpu, BLOCKNUM*n*sizeof(int));
+	cudaMalloc((void**)&sup_gpu, BLOCKNUM*sizeof(int));	
+
+	divNcon(eClass, minSup, index, length,
+	             intersect, sup,
+	             a_gpu, b_gpu, sup_gpu);
+	
+	delete[] intersect;
+	delete[] sup;
+	cudaFree(a_gpu);
+	cudaFree(b_gpu);
+	cudaFree(sup_gpu);
 }
+
+void divNcon(EClass *eClass, int minSup, int* index, int length,int* intersect, int* sup, int*a_gpu, int*b_gpu, int*sup_gpu){
+
+	int size = eClass->items.size();
+    size_t blksize = BLOCKNUM*sizeof(int) ;
+    unsigned int L = length;
+	for (int i = 0; i < size; i++){
+		EClass* children = new EClass();
+		children->parents = eClass->parents;
+		children->parents.push_back(eClass->items[i].id);
+		
+		int *a = eClass->items[i].db;
+		cudaMemcpy(a_gpu, a, L*sizeof(int), cudaMemcpyHostToDevice);	
+
+		for (int j = i + 1; j < size; j+=BLOCKNUM){
+
+			for(int k=0; k<BLOCKNUM; k++){
+				if( (j+k) < size){
+					int*b = eClass->items[j+k].db;
+					cudaMemcpy(&b_gpu[k*L], b, L*sizeof(int), cudaMemcpyHostToDevice);	
+				}		
+			}
+		
+			kernel<<<BLOCKNUM, THREADNUM , THREADNUM * sizeof(int)>>>(a_gpu, b_gpu, sup_gpu, L);
+			cudaMemcpy(sup, sup_gpu, blksize, cudaMemcpyDeviceToHost);
+			cudaMemcpy(intersect, b_gpu , blksize*L, cudaMemcpyDeviceToHost);
+			for(int k=0; k<BLOCKNUM; k++){
+				int support = sup[k];
+				if (support >= minSup && (j+k) < size){
+					int* bitvector = new int[length];
+					int* intersect_ptr = &intersect[k*L];
+					std::copy(intersect_ptr, intersect_ptr + L , bitvector);
+					children->items.push_back(Item(eClass->items[j+k].id, bitvector, support));
+				}					
+			}
+            
+		}
+
+        
+		if (children->items.size() != 0){
+			divNcon(children, minSup, index, length , intersect, sup, a_gpu, b_gpu, sup_gpu);
+		}
+
+		for (auto item : children->items)
+			delete[] item.db;
+		delete children;
+	}
+
+	for (auto item : eClass->items){
+		for (auto i : eClass->parents) *out << index[i] << " ";
+		*out << index[item.id] << "(" << item.support << ")" << endl;	
+	}
+
+}
+
+
+__global__ void kernel(int*a_gpu, int*b_gpu, int*sup_gpu, unsigned int length)
+{
+	extern __shared__ int sram[];
+	unsigned int tid = threadIdx.x;
+    unsigned int bid = blockIdx.x;
+	unsigned int i = 0;
+	sram[tid] = 0;
+
+	while ((tid + i) < length) { 
+		b_gpu [tid+i+bid*length] = a_gpu[tid+i] & b_gpu[tid+i+bid*length];
+		sram[tid] += __popc(b_gpu[tid+i+bid*length]);
+		i += blockDim.x;
+	}
+	__syncthreads();
+
+
+	for (unsigned int s=blockDim.x/2; s>0; s>>=1) {
+		if (tid < s) {
+			sram[tid] += sram[tid + s];
+		}
+		__syncthreads();
+	}
+	if (tid == 0) sup_gpu[bid] = sram[0];
+}
+
 
 void mineCPU(EClass *eClass, int minSup, int* index, int length){
 	int size = eClass->items.size();
@@ -220,10 +326,10 @@ void mineCPU(EClass *eClass, int minSup, int* index, int length){
 		}
 		delete children;
 	}
-	/*for (auto item : eClass->items){
+	for (auto item : eClass->items){
 		for (auto i : eClass->parents) *out << index[i] << " ";
 		*out << index[item.id] << "(" << item.support << ")" << endl;
-	}*/
+	}
 }
 int NumberOfSetBits(int i)
 {
