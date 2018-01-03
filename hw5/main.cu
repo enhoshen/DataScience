@@ -246,9 +246,9 @@ void divNcon(EClass *eClass, int minSup, int* index, int length,int* intersect, 
             }		
         }
             int* psum ;
-            //cudaMalloc((void**)&psum , THREADNUM*sizeof(int));
+            cudaMalloc((void**)&psum , THREADNUM*sizeof(int));
 			kernel<<<BLOCKNUM, THREADNUM , THREADNUM * sizeof(int)>>>(a_gpu, b_gpu, sup_gpu, L,psum);
-            //cudaFree(psum);
+            cudaFree(psum);
         cudaMemcpy(sup, sup_gpu, blksize, cudaMemcpyDeviceToHost);
         cudaMemcpy(intersect, b_gpu , blksize*L, cudaMemcpyDeviceToHost);
         for(int k=0; k<BLOCKNUM; k++){
@@ -299,15 +299,15 @@ __global__ void kernel(int*a_gpu, int*b_gpu, int*sup_gpu, unsigned int length , 
 	sum[tid] = 0;
     while ((tid + i) < length) {
 		b_gpu [tid+i+bid*length] = a_gpu[tid+i] & b_gpu[tid+i+bid*length];
-		/*
+		
         int tmp = b_gpu[tid+i+bid*length];
         tmp = tmp - ((tmp >> 1) & 0x55555555);
         tmp = (tmp & 0x33333333) + ((tmp >> 2) & 0x33333333);
         tmp = (((tmp + (tmp >> 4)) & 0x0F0F0F0F) * 0x01010101) >> 24;
-        */
+        
         
 
-		sum[tid] += __popc(b_gpu[tid+i+bid*length]); 
+		sum[tid] +=tmp;
         i += blockDim.x;
 	}
 	__syncthreads();
