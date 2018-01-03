@@ -15,6 +15,14 @@
 
 int THREADNUM = 256;
 int BLOCKNUM = 256;
+void allfree ( int*a ,int*b,int*c,int*d,int*e) {
+	delete[] a;
+	delete[] b;
+	cudaFree(c);
+	cudaFree(d);
+	cudaFree(e);
+}
+
 
 struct ItemDetail{
 	int id;
@@ -61,7 +69,7 @@ void mineGPU(EClass* eClass, int minSup, int* index, int length);
 void mineCPU(EClass* eClass, int minSup, int* index, int length);
 int NumberOfSetBits(int i);
 void divNcon(EClass *eClass, int minSup, int* index, int length, int* intersect, int* sup, int*a_gpu, int*b_gpu, int*sup_gpu);
-__global__ void kernel(int*a_gpu, int*b_gpu, int*sup_gpu, unsigned int length);
+__global__ void kernel(int*a_gpu, int*b_gpu, int*sup_gpu, unsigned int length , int* psum);
 
 auto out = &cout;
 int main(int argc, char** argv){
@@ -70,10 +78,15 @@ int main(int argc, char** argv){
 	bool gpu = true;
 	char* inFileName = NULL; // the input file name
 	float supPer = 0;// user specified minimun support percentage
+    /*
 	if ( argc != 4){//input argument wrong, print usage, return error;
 		ErrorHandler(ERROR_INPUT);
 	}
-
+    */
+    if ( argc == 6 ){
+        THREADNUM = atof(argv[4]);
+        BLOCKNUM = atof(argv[5]);
+    }
 	//set arguments
 	inFileName = argv[1];
 	if ((supPer = atof(argv[2])) == 0 || supPer > 100 || supPer < 0)
@@ -99,8 +112,8 @@ int main(int argc, char** argv){
 	if (gpu){
 		clock_t tGPUMiningStart = clock();
 		mineGPU(root, minSup, index, length);
-		cout << "Time on GPU Mining: " << (double)(clock() - tGPUMiningStart) / CLOCKS_PER_SEC << endl;
-	}
+		cout << "Time on GPU Mining: " << (double)(clock() - tGPUMiningStart) / CLOCKS_PER_SEC << endl;	    
+    }
 	if (cpu){
 		clock_t tCPUMiningStart = clock();
 		mineCPU(root, minSup, index, length);
@@ -193,28 +206,20 @@ void ReadInput(FILE *inputFile, int *tNum, int *iNum, int *&index, float supPer,
 
 void mineGPU(EClass *eClass, int minSup, int* index, int length){
 
-	unsigned int n = length;
-	int * intersect;
-	int * sup;
-	intersect = (int*)malloc(BLOCKNUM*n*sizeof(int));
-	sup = (int*)malloc(BLOCKNUM*sizeof(int));
-
-	int * a_gpu;
-	int * b_gpu;
-	int * sup_gpu;
-	cudaMalloc((void**)&a_gpu, n*sizeof(int));
-	cudaMalloc((void**)&b_gpu, BLOCKNUM*n*sizeof(int));
-	cudaMalloc((void**)&sup_gpu, BLOCKNUM*sizeof(int));	
-
-	divNcon(eClass, minSup, index, length,
-	             intersect, sup,
-	             a_gpu, b_gpu, sup_gpu);
+	unsigned int L = length;
+	int* intersect;
+	int* sup;
+	int* a_gpu ;
+    int*  b_gpu;
+    int*  sup_gpu;
 	
-	delete[] intersect;
-	delete[] sup;
-	cudaFree(a_gpu);
-	cudaFree(b_gpu);
-	cudaFree(sup_gpu);
+    intersect = (int*)malloc(BLOCKNUM*L*sizeof(int));
+	sup = (int*)malloc(BLOCKNUM*sizeof(int));
+	cudaMalloc((void**)&a_gpu, L*sizeof(int));
+	cudaMalloc((void**)&b_gpu, BLOCKNUM*L*sizeof(int));
+	cudaMalloc((void**)&sup_gpu, BLOCKNUM*sizeof(int));	
+	divNcon(eClass, minSup, index, length,   intersect, sup,    a_gpu, b_gpu, sup_gpu);	
+    allfree(intersect, sup , a_gpu , b_gpu,sup_gpu);
 }
 
 void divNcon(EClass *eClass, int minSup, int* index, int length,int* intersect, int* sup, int*a_gpu, int*b_gpu, int*sup_gpu){
@@ -226,29 +231,39 @@ void divNcon(EClass *eClass, int minSup, int* index, int length,int* intersect, 
 		EClass* children = new EClass();
 		children->parents = eClass->parents;
 		children->parents.push_back(eClass->items[i].id);
-		
+
+
+
+////////////////////////////////////////////////////////////////////////////////////		
 		int *a = eClass->items[i].db;
 		cudaMemcpy(a_gpu, a, L*sizeof(int), cudaMemcpyHostToDevice);	
 
 		for (int j = i + 1; j < size; j+=BLOCKNUM){
+        for(int k=0; k<BLOCKNUM; k++){ // block num of items
+            if( (j+k) < size){  // check boundary
+                int*b = eClass->items[j+k].db;
+                cudaMemcpy(&b_gpu[k*L], b, L*sizeof(int), cudaMemcpyHostToDevice);	
+            }		
+        }
+            int* psum ;
+            //cudaMalloc((void**)&psum , THREADNUM*sizeof(int));
+			kernel<<<BLOCKNUM, THREADNUM , THREADNUM * sizeof(int)>>>(a_gpu, b_gpu, sup_gpu, L,psum);
+            //cudaFree(psum);
+        cudaMemcpy(sup, sup_gpu, blksize, cudaMemcpyDeviceToHost);
+        cudaMemcpy(intersect, b_gpu , blksize*L, cudaMemcpyDeviceToHost);
+        for(int k=0; k<BLOCKNUM; k++){
+            int support = sup[k];
+            int* temp = new int[length];
+            int* offst = &intersect[k*L];
+///////////////////////////////////////////////////////////////////////////////////	
 
-			for(int k=0; k<BLOCKNUM; k++){
-				if( (j+k) < size){
-					int*b = eClass->items[j+k].db;
-					cudaMemcpy(&b_gpu[k*L], b, L*sizeof(int), cudaMemcpyHostToDevice);	
-				}		
-			}
-		
-			kernel<<<BLOCKNUM, THREADNUM , THREADNUM * sizeof(int)>>>(a_gpu, b_gpu, sup_gpu, L);
-			cudaMemcpy(sup, sup_gpu, blksize, cudaMemcpyDeviceToHost);
-			cudaMemcpy(intersect, b_gpu , blksize*L, cudaMemcpyDeviceToHost);
-			for(int k=0; k<BLOCKNUM; k++){
-				int support = sup[k];
-				if (support >= minSup && (j+k) < size){
-					int* bitvector = new int[length];
-					int* intersect_ptr = &intersect[k*L];
-					std::copy(intersect_ptr, intersect_ptr + L , bitvector);
-					children->items.push_back(Item(eClass->items[j+k].id, bitvector, support));
+
+
+
+
+				if (support >= minSup && (j+k) < size){   // check boundary
+				std::copy(offst, offst + L , temp );
+					children->items.push_back(Item(eClass->items[j+k].id , temp, support));
 				}					
 			}
             
@@ -272,31 +287,41 @@ void divNcon(EClass *eClass, int minSup, int* index, int length,int* intersect, 
 }
 
 
-__global__ void kernel(int*a_gpu, int*b_gpu, int*sup_gpu, unsigned int length)
+__global__ void kernel(int*a_gpu, int*b_gpu, int*sup_gpu, unsigned int length , int* psum)
 {
-	extern __shared__ int sram[];
+	
 	unsigned int tid = threadIdx.x;
+    //psum[tid] = 0;    
     unsigned int bid = blockIdx.x;
 	unsigned int i = 0;
-	sram[tid] = 0;
 
-	while ((tid + i) < length) { 
+    extern __shared__ int sum [];
+	sum[tid] = 0;
+    while ((tid + i) < length) {
 		b_gpu [tid+i+bid*length] = a_gpu[tid+i] & b_gpu[tid+i+bid*length];
-		sram[tid] += __popc(b_gpu[tid+i+bid*length]);
-		i += blockDim.x;
+		/*
+        int tmp = b_gpu[tid+i+bid*length];
+        tmp = tmp - ((tmp >> 1) & 0x55555555);
+        tmp = (tmp & 0x33333333) + ((tmp >> 2) & 0x33333333);
+        tmp = (((tmp + (tmp >> 4)) & 0x0F0F0F0F) * 0x01010101) >> 24;
+        */
+        
+
+		sum[tid] += __popc(b_gpu[tid+i+bid*length]); 
+        i += blockDim.x;
 	}
 	__syncthreads();
 
 
-	for (unsigned int s=blockDim.x/2; s>0; s>>=1) {
-		if (tid < s) {
-			sram[tid] += sram[tid + s];
+	for (unsigned int i=blockDim.x/2; i>0; i>>=1) {
+		if (tid < i) {
+		//	psum[tid] += psum[tid + i];
+        sum[tid] += sum[tid+i];
 		}
 		__syncthreads();
 	}
-	if (tid == 0) sup_gpu[bid] = sram[0];
+	if (tid == 0) sup_gpu[bid] = sum[0];
 }
-
 
 void mineCPU(EClass *eClass, int minSup, int* index, int length){
 	int size = eClass->items.size();
